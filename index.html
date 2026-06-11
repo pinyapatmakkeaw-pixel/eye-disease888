@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VisionAI -ระบบคัดกรองดวงตาเบื้องต้น</title>
+    
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest/dist/tfjs.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@latest/dist/teachablemachine-image.min.js"></script>
+    
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+    <style>
+        :root {
+            --bg-main: #f0f4f8;
+            --card-bg: #ffffff;
+            --primary: #007aff;
+            --primary-light: #e1f0ff;
+            --success: #34c759;
+            --success-light: #e8f9ec;
+            --warning: #ff9500;
+            --text-main: #1c1c1e;
+            --text-muted: #8e8e93;
+            --border-color: #e5e5ea;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Kanit', sans-serif; }
+        
+        body { 
+            background-color: var(--bg-main); 
+            color: var(--text-main); 
+            min-height: 100vh; 
+            display: flex; 
+            justify-content: center; 
+            align-items: center; 
+            padding: 20px;
+        }
+
+        .app-container { 
+            width: 100%; 
+            max-width: 480px; 
+            background: var(--card-bg); 
+            border-radius: 24px; 
+            padding: 30px 24px; 
+            box-shadow: 0 12px 30px rgba(0, 122, 255, 0.08); 
+            border: 1px solid var(--border-color); 
+            text-align: center;
+        }
+
+        /* ส่วนหัวข้อ โทนฟ้า-ขาว สะอาดตา */
+        header h1 { 
+            font-size: 2.2rem; 
+            font-weight: 700;
+            color: var(--primary);
+            margin-bottom: 4px;
+        }
+        header p { 
+            color: var(--text-muted); 
+            font-size: 0.95rem; 
+            margin-bottom: 25px; 
+            font-weight: 400;
+        }
+
+        /* แถบสถานะระบบ */
+        .status-badge { 
+            display: inline-flex; align-items: center; gap: 8px;
+            padding: 8px 16px; border-radius: 20px; font-size: 0.85rem; 
+            background: #f2f2f7; color: #48484a; 
+            margin-bottom: 25px; border: 1px solid var(--border-color);
+            font-weight: 500;
+        }
+
+        /* กล่องหน้าจอแสดงผลกล้อง/รูปภาพ */
+        .display-box { 
+            position: relative; width: 100%; aspect-ratio: 4/3; 
+            background: #f2f2f7; border-radius: 18px; overflow: hidden; 
+            border: 1px solid var(--border-color); margin-bottom: 25px; 
+            display: flex; justify-content: center; align-items: center; 
+        }
+        #webcam-container, #image-preview { width: 100%; height: 100%; display: flex; justify-content: center; align-items: center; }
+        #webcam-container video, #image-preview img { width: 100%; height: 100%; object-fit: cover; }
+
+        /* เอฟเฟกต์เส้นสแกนสีฟ้าใส */
+        .scan-line {
+            position: absolute; width: 100%; height: 3px;
+            background: linear-gradient(to bottom, transparent, var(--primary), transparent);
+            top: 0; left: 0; z-index: 5; display: none;
+            animation: scanAnim 2.5s linear infinite;
+        }
+        @keyframes scanAnim {
+            0% { top: 0%; }
+            50% { top: 100%; }
+            100% { top: 0%; }
+        }
+
+        /* ส่วนปุ่มกดควบคุม */
+        .control-group { display: flex; flex-direction: column; gap: 12px; margin-bottom: 25px; }
+        .btn { 
+            border: none; padding: 14px 20px; 
+            font-size: 1rem; font-weight: 600; border-radius: 14px; 
+            cursor: pointer; width: 100%; transition: all 0.2s ease; 
+            display: flex; justify-content: center; align-items: center; gap: 10px;
+        }
+        .btn-primary { background: var(--primary); color: white; box-shadow: 0 4px 12px rgba(0, 122, 255, 0.2); }
+        .btn-primary:hover { background: #0066d6; transform: translateY(-1px); }
+        .btn-secondary { background: var(--primary-light); color: var(--primary); }
+        .btn-secondary:hover { background: #d0e7ff; }
+        .btn:disabled { background: #e5e5ea !important; color: #a1a1aa !important; cursor: not-allowed; transform: none; box-shadow: none; }
+
+        /* ส่วนแสดงผลลัพธ์ */
+        .result-box { 
+            margin-top: 10px; padding: 20px; background: #f8fafc; 
+            border-radius: 18px; border: 1px solid var(--border-color); display: none; 
+        }
+        .prediction-bar { margin-bottom: 15px; text-align: left; }
+        .prediction-bar:last-child { margin-bottom: 0; }
+        .label-text { display: flex; justify-content: space-between; font-size: 0.95rem; margin-bottom: 6px; font-weight: 500; }
+        .progress-track { width: 100%; height: 10px; background: #e5e5ea; border-radius: 5px; overflow: hidden; }
+        .progress-fill { height: 100%; width: 0%; background: var(--primary); transition: width 0.5s ease; }
+
+        /* ✨ กล่องคำเตือนทางการแพทย์ที่เกลาคำให้สวยงามเป็นทางการ */
+        .medical-disclaimer {
+            margin-top: 25px; padding: 16px 20px; background: #fff9f0;
+            border-radius: 16px; border: 1px solid rgba(255, 149, 0, 0.25);
+            text-align: left; font-size: 0.88rem; line-height: 1.6; color: #663c00;
+            display: none;
+            box-shadow: 0 2px 8px rgba(255, 149, 0, 0.04);
+        }
+        .medical-disclaimer i { color: var(--warning); margin-right: 6px; font-size: 1.05rem; }
+    </style>
+</head>
+<body>
+
+    <div class="app-container">
+        <header>
+            <h1>VisionAI</h1>
+            <p>ระบบวิเคราะห์และคัดกรองความเสี่ยงโรคตาเบื้องต้น</p>
+        </header>
+
+        <div id="status-badge" class="status-badge">
+            <i class="fa-solid fa-sync fa-spin"></i> กำลังเชื่อมต่อระบบ AI...
+        </div>
+
+        <div class="display-box">
+            <div id="scan-line" class="scan-line"></div>
+            <div id="webcam-container"></div>
+            <div id="image-preview"></div>
+            <div id="placeholder-icon" style="color: #c7c7cc; font-size: 4.5rem; position: absolute; z-index: 1;">
+                <i class="fa-solid fa-user-md"></i>
+            </div>
+        </div>
+
+        <div class="control-group">
+            <button id="start-btn" class="btn btn-primary" onclick="initWebcam()" disabled>
+                <i class="fa-solid fa-camera"></i> เปิดกล้องสแกนดวงตา
+            </button>
+            
+            <button id="upload-trigger" class="btn btn-secondary" onclick="document.getElementById('file-input').click()" disabled>
+                <i class="fa-solid fa-image"></i> เลือกรูปภาพจากคลัง
+            </button>
+            <input type="file" id="file-input" accept="image/*" style="display: none;" onchange="handleImageUpload(event)">
+        </div>
+
+        <div id="result-box" class="result-box">
+            <div id="label-container"></div>
+        </div>
+
+        <div id="disclaimer" class="medical-disclaimer">
+            <p><i class="fa-solid fa-circle-info"></i> <strong>ข้อแนะนำและข้อจำกัดของระบบ:</strong> 
+            การประเมินผลข้างต้นเป็นเพียงการวิเคราะห์ข้อมูลเชิงสถิติโดยปัญญาประดิษฐ์ (AI) ในเบื้องต้นเท่านั้น 
+            ระบบนี้<strong>มิใช่การวินิจฉัยโรคทางการแพทย์</strong>และไม่สามารถทดสอบทดแทนการตรวจรักษาโดยผู้เชี่ยวชาญได้ 
+            เพื่อความถูกต้องและความปลอดภัยสูงสุดของสุขอนามัยดวงตา 
+            หากท่านพบสัญญาณความเสี่ยงหรือมีอาการผิดปกติประการใด แนะนำให้เข้าพบจักษุแพทย์เพื่อรับการตรวจวินิจฉัยอย่างละเอียดต่อไปครับ</p>
+        </div>
+    </div>
+
+    <script type="text/javascript">
+        const URL = "./"; 
+
+        let model, webcam, labelContainer, maxClassIdentifiers, isWebcamMode = false;
+        const statusBadge = document.getElementById("status-badge");
+        const startBtn = document.getElementById("start-btn");
+        const uploadTrigger = document.getElementById("upload-trigger");
+        const resultBox = document.getElementById("result-box");
+        const disclaimer = document.getElementById("disclaimer");
+        const placeholder = document.getElementById("placeholder-icon");
+        const scanLine = document.getElementById("scan-line");
+
+        // โหลดโมเดลเมื่อเข้าเว็บ
+        async function loadModel() {
+            try {
+                model = await tmImage.load(URL + "model.json", URL + "metadata.json");
+                maxClassIdentifiers = model.getTotalClasses();
+                
+                statusBadge.innerHTML = '<i class="fa-solid fa-circle-check"></i> ระบบ AI พร้อมประมวลผล';
+                statusBadge.style.color = "var(--success)";
+                statusBadge.style.background = "var(--success-light)";
+                statusBadge.style.borderColor = "rgba(52, 199, 89, 0.2)";
+                
+                startBtn.disabled = false;
+                uploadTrigger.disabled = false;
+            } catch (e) {
+                console.error(e);
+                statusBadge.innerHTML = '<i class="fa-solid fa-circle-xmark"></i> ไม่สามารถโหลดโมเดลได้';
+                statusBadge.style.color = "#ff3b30";
+                statusBadge.style.background = "#ffe5e5";
+            }
+        }
+
+        // โหมดกล้อง
+        async function initWebcam() {
+            startBtn.disabled = true;
+            uploadTrigger.disabled = false;
+            isWebcamMode = true;
+            
+            document.getElementById("image-preview").innerHTML = "";
+            placeholder.style.display = "none";
+            scanLine.style.display = "block";
+            resultBox.style.display = "block";
+            disclaimer.style.display = "block";
+
+            try {
+                webcam = new tmImage.Webcam(400, 300, false);
+                await webcam.setup({ facingMode: "environment" }); 
+                await webcam.play();
+                window.requestAnimationFrame(loopWebcam);
+
+                const container = document.getElementById("webcam-container");
+                container.innerHTML = "";
+                container.appendChild(webcam.canvas);
+                setupResultUI();
+            } catch (err) {
+                alert("กรุณาอนุญาตสิทธิ์การเข้าถึงกล้องในเบราว์เซอร์ของคุณ");
+                startBtn.disabled = false;
+            }
+        }
+
+        async function loopWebcam() {
+            if (!isWebcamMode) return;
+            webcam.update();
+            await predict(webcam.canvas);
+            window.requestAnimationFrame(loopWebcam);
+        }
+
+        // โหมดอัปโหลดรูปภาพ
+        async function handleImageUpload(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            if (isWebcamMode && webcam) {
+                await webcam.stop();
+                isWebcamMode = false;
+                document.getElementById("webcam-container").innerHTML = "";
+            }
+
+            placeholder.style.display = "none";
+            scanLine.style.display = "block";
+            resultBox.style.display = "block";
+            disclaimer.style.display = "block";
+            startBtn.disabled = false;
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const imgContainer = document.getElementById("image-preview");
+                imgContainer.innerHTML = `<img id="uploaded-img" src="${e.target.result}">`;
+                
+                const img = new Image();
+                img.src = e.target.result;
+                img.onload = async function() {
+                    setupResultUI();
+                    await predict(img);
+                }
+            }
+            reader.readAsDataURL(file);
+        }
+
+        function setupResultUI() {
+            labelContainer = document.getElementById("label-container");
+            labelContainer.innerHTML = "";
+            for (let i = 0; i < maxClassIdentifiers; i++) {
+                labelContainer.insertAdjacentHTML('beforeend', `
+                    <div class="prediction-bar">
+                        <div class="label-text">
+                            <span id="class-name-${i}">-</span>
+                            <span id="class-pct-${i}">0%</span>
+                        </div>
+                        <div class="progress-track">
+                            <div id="bar-fill-${i}" class="progress-fill"></div>
+                        </div>
+                    </div>`);
+            }
+        }
+
+        // ประมวลผลและเปลี่ยนชื่อโรคภาษาไทยให้ซอฟต์ลง
+        async function predict(inputElement) {
+            const prediction = await model.predict(inputElement);
+            for (let i = 0; i < maxClassIdentifiers; i++) {
+                let className = prediction[i].className;
+                
+                if(className === 'ต้อหิน') className = "⚠️ มีสัญญาณความเสี่ยงโรคต้อหิน (Glaucoma)";
+                if(className === 'ต้อเนื้อ') className = "⚠️ มีสัญญาณความเสี่ยงโรคต้อเนื้อ (Pterygium)";
+                if(className.toLowerCase() === 'normal' || className === 'ปกติ') className = "✅ ไม่พบความสว่างผิดปกติวิกฤต (Normal)";
+
+                const probability = (prediction[i].probability * 100).toFixed(1);
+                
+                document.getElementById(`class-name-${i}`).innerText = className;
+                document.getElementById(`class-pct-${i}`).innerText = probability + "%";
+                
+                const barFill = document.getElementById(`bar-fill-${i}`);
+                barFill.style.width = probability + "%";
+                
+                // เปลี่ยนสีแถบตามความเสี่ยง
+                if (prediction[i].probability > 0.5 && className.includes('⚠️')) {
+                    barFill.style.background = "var(--warning)";
+                } else if (className.includes('✅')) {
+                    barFill.style.background = "var(--success)";
+                } else {
+                    barFill.style.background = "var(--primary)";
+                }
+            }
+        }
+
+        window.onload = loadModel;
+    </script>
+</body>
+</html>
